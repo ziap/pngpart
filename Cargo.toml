@@ -1,0 +1,8 @@
+[package]
+name = "pngpart"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+oxipng = { version = "9.0.0", features = ["parallel", "zopfli", "filetime"], default-features = false }
+png = "0.17.10"

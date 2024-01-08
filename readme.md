@@ -10,9 +10,11 @@ also incorporates oxipng for optimal PNG encoding.
 
 ## Algorithm
 
-| High tolerance               | Medium tolerance             | Low tolerance                |
+| High tolerance (76Kb)        | Medium tolerance (285Kb)     | Low tolerance (420Kb)        |
 | ---------------------------- | ---------------------------- | ---------------------------- |
 | ![](example/squirrel-e2.png) | ![](example/squirrel-e1.png) | ![](example/squirrel-e0.png) |
+
+<sub>Original image: 540Kb</sub>
 
 The algorithm iteratively divides the image into axis-aligned regions. Each
 region is colored with its average color. In every iteration, the region with

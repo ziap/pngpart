@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::io::BufWriter;
 use std::{env, collections::BinaryHeap};
 use std::fs::File;
@@ -11,18 +12,23 @@ use std::time::Instant;
 fn get_arguments() -> Option<(Box<str>, Box<str>)> {
     let mut args = env::args();
     let name = args.next()?;
-    if let Some(in_file) = args.next() {
-        if let Some(out_file) = args.next() {
-            Some((in_file.into(), out_file.into()))
-        } else {
+
+    let in_file = match args.next() {
+        Some(in_file) => in_file,
+        None => {
+            eprintln!("ERROR: no input file");
+            eprintln!("USAGE: {name} <input file> <output file>");
+            return None;
+        }
+    };
+
+    match args.next() {
+        Some(out_file) => Some((in_file.into(), out_file.into())),
+        None => {
             eprintln!("ERROR: no output file");
             eprintln!("USAGE: {name} <input file> <output file>");
             None
         }
-    } else {
-        eprintln!("ERROR: no input file");
-        eprintln!("USAGE: {name} <input file> <output file>");
-        None
     }
 }
 
@@ -34,30 +40,38 @@ struct Image {
 }
 
 fn read_image(path: &str) -> Option<Image> {
-    match File::open(path) {
-        Ok(file) => {
-            let mut decoder = png::Decoder::new(file);
-            decoder.set_transformations(png::Transformations::ALPHA);
-            let mut reader = decoder.read_info().unwrap();
-            let mut buf = vec![0u8; reader.output_buffer_size()];
-            match reader.next_frame(&mut buf) {
-                Ok(info) => {
-                    buf.resize(info.buffer_size(), 0);
-                    Some(Image {
-                        width: info.width as usize,
-                        height: info.height as usize,
-                        data: buf.into_boxed_slice()
-                    })
-                },
-                Err(err) => {
-                    eprintln!("ERROR: Problem decoding image `{path}`: {err}");
-                    None
-                }
-            }
+    let file = match File::open(path) {
+        Ok(file) => file,
+        Err(err) => {
+            eprintln!("ERROR: Failed to open `{path}`: {err}");
+            return None;
+        }
+    };
+
+    let mut decoder = png::Decoder::new(file);
+    decoder.set_transformations(png::Transformations::ALPHA);
+
+    let mut reader = match decoder.read_info() {
+        Ok(reader) => reader,
+        Err(err) => {
+            eprintln!("ERROR: Failed to decode `{path}`: {err}");
+            return None;
+        }
+    };
+
+    let mut buf = vec![0u8; reader.output_buffer_size()];
+    match reader.next_frame(&mut buf) {
+        Ok(info) => {
+            buf.resize(info.buffer_size(), 0);
+            Some(Image {
+                width: info.width as usize,
+                height: info.height as usize,
+                data: buf.into_boxed_slice()
+            })
         },
         Err(err) => {
-            eprintln!("ERROR: Problem opening image `{path}`: {err}");
-            None
+            eprintln!("ERROR: Failed to decode `{path}`: {err}");
+            return None
         }
     }
 }
@@ -68,29 +82,39 @@ fn save_image(img: Image, path: &str) {
     let buf = &img.data as &[u8];
 
     let mut out_buf = Vec::<u8>::new();
-    
+
     {
         let mut encoder = png::Encoder::new(BufWriter::new(&mut out_buf), w, h);
         encoder.set_color(png::ColorType::Rgba);
         encoder.set_depth(png::BitDepth::Eight);
         encoder.set_compression(png::Compression::Fast);
 
-        let mut writer = encoder.write_header().unwrap();
-        writer.write_image_data(buf).unwrap();
+        let mut writer = match encoder.write_header() {
+            Ok(writer) => writer,
+            Err(err) => {
+                eprintln!("ERROR: Failed to generate PNG header: {err}");
+                return;
+            }
+        };
+
+        if let Err(err) = writer.write_image_data(buf) {
+            eprintln!("ERROR: Failed to encode image to PNG: {err}");
+        }
     }
 
-    match oxipng::optimize_from_memory(&out_buf, &oxipng::Options::default()) {
-        Ok(optimized) => {
-            if let Err(err) = std::fs::write(path, optimized) {
-                eprintln!("ERROR: Failed to write image `{path}`: {err}")
-            };
-        },
-        Err(err) => eprintln!("ERROR: Failed to optimize image `{path}`: {err}")
+    let optimized = match oxipng::optimize_from_memory(&out_buf, &oxipng::Options::default()) {
+        Ok(optimized) => optimized,
+        Err(err) => {
+            eprintln!("ERROR: Failed to optimize image `{path}`: {err}");
+            return;
+        }
+    };
+
+    if let Err(err) = std::fs::write(path, optimized) {
+        eprintln!("ERROR: Failed to write image to `{path}`: {err}");
     }
 }
 
-// TODO: Remove all traits
-#[derive(Eq, Ord, PartialEq, PartialOrd)]
 struct Bound {
     x_min: usize,
     x_max: usize,
@@ -123,13 +147,31 @@ fn compute_mean(img: &Image, bound: &Bound) -> [u64; 4] {
     mean
 }
 
-// TODO: Reimplement these traits
-#[derive(Eq, Ord, PartialEq, PartialOrd)]
 struct HeapItem {
     var: u64,
-    
+
     bound: Bound
 }
+
+impl PartialEq for HeapItem {
+    fn eq(&self, other: &Self) -> bool {
+        self.var == other.var
+    }
+}
+
+impl PartialOrd for HeapItem {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.var.cmp(&other.var))
+    }
+}
+
+impl Ord for HeapItem {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.var.cmp(&other.var)
+    }
+}
+
+impl Eq for HeapItem {}
 
 impl HeapItem {
     fn new(img: &Image, bound: Bound) -> Self {
@@ -144,6 +186,7 @@ impl HeapItem {
                 }
             }
         }
+
         Self { var: variance, bound }
     }
 }
@@ -207,7 +250,7 @@ impl Compressor {
         let mut out_img = Image {
             width: self.img.width,
             height: self.img.height,
-            
+
             data: vec![0u8; self.img.data.len()].into_boxed_slice()
         };
 
@@ -245,6 +288,6 @@ fn main() {
             let optimize_start = Instant::now();
             save_image(out_img, &out_file);
             eprintln!("DONE [{}ms]", optimize_start.elapsed().as_millis());
-        };
+        }
     }
 }

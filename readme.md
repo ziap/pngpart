@@ -8,9 +8,12 @@ visible quality loss.
 This repo is a Rust implementation of the algorithm and a basic CLI tool that
 also incorporates oxipng for optimal PNG encoding.
 
+**NOTE:** this is just a toy image compression scheme. It can commpresse images
+but other lossy compression method are better (JPEG, WebP, pngquant, ...)
+
 ## Algorithm
 
-| High tolerance (76Kb)        | Medium tolerance (285Kb)     | Low tolerance (420Kb)        |
+| High tolerance (74Kb)        | Medium tolerance (279Kb)     | Low tolerance (420Kb)        |
 | ---------------------------- | ---------------------------- | ---------------------------- |
 | ![](example/squirrel-e2.png) | ![](example/squirrel-e1.png) | ![](example/squirrel-e0.png) |
 
@@ -26,6 +29,42 @@ quality but reduces compression rate. Instead of using a fixed iteration count,
 the tolerance is used instead as the stopping criteria. This means that the
 algorithm will stop when the maximum variance falls below a certain
 threshold.
+
+## Features
+
+| Original (500Kb)              | Compressed (424Kb)              |
+| ----------------------------- | ------------------------------- |
+| ![](example/cat-original.png) | ![](example/cat-compressed.png) |
+
+- Command line tool for compressing PNG
+- Preserves alpha channel
+- Further reduce file size with oxipng
+
+## Other usages
+
+Other non-compression capabilities of this algorithm, currently only for
+demonstration and not implementated in this repository.
+
+- Image detail heatmap (based on how many time a pixel is divided)
+
+| Image                        | Heatmap (brighter = more detailed)              |
+| ---------------------------- | ----------------------------------------------- |
+| ![](example/squirrel-e0.png) | <img src="example/heatmap.png" width="640px" /> |
+
+- Image stylization (by rendering other shapes instead of AABB)
+
+| Original                   | Stylized with ellipses     |
+| -------------------------- | -------------------------- |
+| ![](example/landscape.jpg) | ![](example/landscape.png) |
+
+## Todo
+
+- Add way to control quality from the command line arguments
+- Make a web interface
+- SVG output with shape other than AABB
+- Bulk processing multiple images
+- Experiments with other region rendering methods
+- Experiments with other splitting methods
 
 ## Installation and usage
 
@@ -64,6 +103,12 @@ This shows that while PNGPart has a worse compression ratio, the image quality
 is slightly better based on many common image comparison metrics. Note that
 these metrics don't really reflect the perceptual image quality, and the
 output of pngquant is also almost indistinguishable from the original image.
+
+Further experiments:
+- Test on graphical images (digital illustration, textures, cartoon, SVG
+converted to PNG, ...)
+- Test with same SSIM or same file size
+- Graph BPP (bit per pixel) vs quality
 
 ## Licence
 

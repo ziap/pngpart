@@ -2,7 +2,6 @@ use std::cmp::Ordering;
 use std::io::BufWriter;
 use std::{env, collections::BinaryHeap};
 use std::fs::File;
-use std::time::Instant;
 
 // TODO: replace with clap for more options
 //  - Oxipng settings (enabled, level)
@@ -76,7 +75,7 @@ fn read_image(path: &str) -> Option<Image> {
     }
 }
 
-fn save_image(img: Image, path: &str) {
+fn save_image(img: Image, path: &str) -> bool {
     let w = img.width as u32;
     let h = img.height as u32;
     let buf = &img.data as &[u8];
@@ -93,12 +92,13 @@ fn save_image(img: Image, path: &str) {
             Ok(writer) => writer,
             Err(err) => {
                 eprintln!("ERROR: Failed to generate PNG header: {err}");
-                return;
+                return false;
             }
         };
 
         if let Err(err) = writer.write_image_data(buf) {
             eprintln!("ERROR: Failed to encode image to PNG: {err}");
+            return false;
         }
     }
 
@@ -106,12 +106,16 @@ fn save_image(img: Image, path: &str) {
         Ok(optimized) => optimized,
         Err(err) => {
             eprintln!("ERROR: Failed to optimize image `{path}`: {err}");
-            return;
+            return false;
         }
     };
 
-    if let Err(err) = std::fs::write(path, optimized) {
-        eprintln!("ERROR: Failed to write image to `{path}`: {err}");
+    match std::fs::write(path, optimized) {
+        Ok(()) => true,
+        Err(err) => {
+            eprintln!("ERROR: Failed to write image to `{path}`: {err}");
+            false
+        }
     }
 }
 
@@ -271,23 +275,23 @@ impl Compressor {
     }
 }
 
-fn process_image(img: Image) -> Image {
+fn main() {
+    let (in_file, out_file) = match get_arguments() {
+        Some(filepaths) => filepaths,
+        None => std::process::exit(1),
+    };
+
+    let img = match read_image(&in_file) {
+        Some(img) => img,
+        None => std::process::exit(1),
+    };
+
     let mut compressor = Compressor::new(img);
     compressor.compress(128);
-    compressor.reconstruct()
-}
+    eprintln!("Iterations: {}", compressor.heap.len());
+    let out_img = compressor.reconstruct();
 
-fn main() {
-    if let Some((in_file, out_file)) = get_arguments() {
-        if let Some(img) = read_image(&in_file) {
-            eprint!("INFO: Compressing `{in_file}`... ");
-            let compress_start = Instant::now();
-            let out_img = process_image(img);
-            eprintln!("DONE [{}ms]", compress_start.elapsed().as_millis());
-            eprint!("INFO: Optimizing `{in_file}`... ");
-            let optimize_start = Instant::now();
-            save_image(out_img, &out_file);
-            eprintln!("DONE [{}ms]", optimize_start.elapsed().as_millis());
-        }
+    if !save_image(out_img, &out_file) {
+        std::process::exit(1) 
     }
 }

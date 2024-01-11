@@ -8,25 +8,25 @@ use std::fs::File;
 //  - Tolerance/iterations
 //  - Verbose (logging, timing)
 //  - Glob support
-fn get_arguments() -> Option<(Box<str>, Box<str>)> {
+fn get_arguments() -> (Box<str>, Box<str>) {
     let mut args = env::args();
-    let name = args.next()?;
+    let name = args.next().unwrap_or(String::from(env!("CARGO_CRATE_NAME")));
 
     let in_file = match args.next() {
         Some(in_file) => in_file,
         None => {
             eprintln!("ERROR: no input file");
             eprintln!("USAGE: {name} <input file> <output file>");
-            return None;
+            std::process::exit(1);
         }
     };
 
     match args.next() {
-        Some(out_file) => Some((in_file.into(), out_file.into())),
+        Some(out_file) => (in_file.into(), out_file.into()),
         None => {
             eprintln!("ERROR: no output file");
             eprintln!("USAGE: {name} <input file> <output file>");
-            None
+            std::process::exit(1);
         }
     }
 }
@@ -38,12 +38,12 @@ struct Image {
     data: Box<[u8]>
 }
 
-fn read_image(path: &str) -> Option<Image> {
+fn read_image(path: &str) -> Image {
     let file = match File::open(path) {
         Ok(file) => file,
         Err(err) => {
             eprintln!("ERROR: Failed to open `{path}`: {err}");
-            return None;
+            std::process::exit(1);
         }
     };
 
@@ -54,7 +54,7 @@ fn read_image(path: &str) -> Option<Image> {
         Ok(reader) => reader,
         Err(err) => {
             eprintln!("ERROR: Failed to decode `{path}`: {err}");
-            return None;
+            std::process::exit(1);
         }
     };
 
@@ -62,20 +62,20 @@ fn read_image(path: &str) -> Option<Image> {
     match reader.next_frame(&mut buf) {
         Ok(info) => {
             buf.resize(info.buffer_size(), 0);
-            Some(Image {
+            Image {
                 width: info.width as usize,
                 height: info.height as usize,
-                data: buf.into_boxed_slice()
-            })
+                data: buf.into()
+            }
         },
         Err(err) => {
             eprintln!("ERROR: Failed to decode `{path}`: {err}");
-            return None
+            std::process::exit(1);
         }
     }
 }
 
-fn save_image(img: Image, path: &str) -> bool {
+fn save_image(img: Image, path: &str) {
     let w = img.width as u32;
     let h = img.height as u32;
     let buf = &img.data as &[u8];
@@ -92,13 +92,13 @@ fn save_image(img: Image, path: &str) -> bool {
             Ok(writer) => writer,
             Err(err) => {
                 eprintln!("ERROR: Failed to generate PNG header: {err}");
-                return false;
+                std::process::exit(1);
             }
         };
 
         if let Err(err) = writer.write_image_data(buf) {
             eprintln!("ERROR: Failed to encode image to PNG: {err}");
-            return false;
+            std::process::exit(1);
         }
     }
 
@@ -106,16 +106,13 @@ fn save_image(img: Image, path: &str) -> bool {
         Ok(optimized) => optimized,
         Err(err) => {
             eprintln!("ERROR: Failed to optimize image `{path}`: {err}");
-            return false;
+            std::process::exit(1);
         }
     };
 
-    match std::fs::write(path, optimized) {
-        Ok(()) => true,
-        Err(err) => {
-            eprintln!("ERROR: Failed to write image to `{path}`: {err}");
-            false
-        }
+    if let Err(err) = std::fs::write(path, optimized) {
+        eprintln!("ERROR: Failed to write image to `{path}`: {err}");
+        std::process::exit(1);
     }
 }
 
@@ -181,17 +178,17 @@ impl HeapItem {
     fn new(img: &Image, bound: Bound) -> Self {
         let mean = compute_mean(img, &bound);
 
-        let mut variance: u64 = 0;
+        let mut var = 0;
         for i in bound.y_min..bound.y_max {
             for j in bound.x_min..bound.x_max {
                 for k in 0..4 {
                     let diff = img.data[4 * (i * img.width + j) + k] as i64 - mean[k] as i64;
-                    variance += (diff * diff) as u64;
+                    var += (diff * diff) as u64;
                 }
             }
         }
 
-        Self { var: variance, bound }
+        Self { var, bound }
     }
 }
 
@@ -250,48 +247,31 @@ impl Compressor {
         }
     }
 
-    fn reconstruct(self) -> Image {
-        let mut out_img = Image {
-            width: self.img.width,
-            height: self.img.height,
-
-            data: vec![0u8; self.img.data.len()].into_boxed_slice()
-        };
-
+    fn reconstruct(mut self) -> Image {
         for item in self.heap {
             let mean = compute_mean(&self.img, &item.bound);
 
             for i in item.bound.y_min..item.bound.y_max {
                 for j in item.bound.x_min..item.bound.x_max {
-                    let idx = 4 * (i * out_img.width + j);
+                    let idx = 4 * (i * self.img.width + j);
                     for k in 0..4 {
-                        out_img.data[idx + k] = mean[k] as u8;
+                        self.img.data[idx + k] = mean[k] as u8;
                     }
                 }
             }
         }
 
-        out_img
+        self.img
     }
 }
 
 fn main() {
-    let (in_file, out_file) = match get_arguments() {
-        Some(filepaths) => filepaths,
-        None => std::process::exit(1),
-    };
-
-    let img = match read_image(&in_file) {
-        Some(img) => img,
-        None => std::process::exit(1),
-    };
+    let (in_file, out_file) = get_arguments();
+    let img = read_image(&in_file);
 
     let mut compressor = Compressor::new(img);
     compressor.compress(128);
     eprintln!("Iterations: {}", compressor.heap.len());
-    let out_img = compressor.reconstruct();
-
-    if !save_image(out_img, &out_file) {
-        std::process::exit(1) 
-    }
+    
+    save_image(compressor.reconstruct(), &out_file);
 }

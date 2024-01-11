@@ -80,7 +80,7 @@ fn save_image(img: Image, path: &str) {
     let h = img.height as u32;
     let buf = &img.data as &[u8];
 
-    let mut out_buf = Vec::<u8>::new();
+    let mut out_buf = Vec::new();
 
     {
         let mut encoder = png::Encoder::new(BufWriter::new(&mut out_buf), w, h);
@@ -199,7 +199,7 @@ struct Compressor {
 
 impl Compressor {
     fn new(img: Image) -> Self {
-        let mut heap = BinaryHeap::<HeapItem>::new();
+        let mut heap = BinaryHeap::new();
         heap.push(HeapItem::new(&img, Bound::new(0, img.width, 0, img.height)));
         Self { img, heap }
     }
